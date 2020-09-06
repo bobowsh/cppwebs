@@ -59,7 +59,7 @@ typedef struct cJSON
     double valuedouble; /* The item's number, if type==cJSON_Number */
     int sign;   /* sign of valueint, 1(unsigned), -1(signed) */
 
-    char *string; /* The item's name string, if this item is the child of, or is in the list of subitems of an object. */
+    char *string; /* The item's ename string, if this item is the child of, or is in the list of subitems of an object. */
 } cJSON;
 
 typedef struct cJSON_Hooks
@@ -134,6 +134,12 @@ extern void cJSON_ReplaceItemInObject(cJSON *object, const char *string,
 #define cJSON_AddNumberToObject(object,name,n)	cJSON_AddItemToObject(object, name, cJSON_CreateNumber(n))
 #define cJSON_AddStringToObject(object,name,s)	cJSON_AddItemToObject(object, name, cJSON_CreateString(s))
 
+cJSON* cJSON_SetValuestring(cJSON *object, const char *valuestring);
+cJSON* cJSON_SetIntValue(cJSON *object, int nVal);
+cJSON* cJSON_SetDoubleValue(cJSON *object, double nVal);
+cJSON* cJSON_SetBoolValue(cJSON *object, uint32 bVal);
+cJSON* cJSON_SetObjectValue(cJSON *object, cJSON *newitem);
+cJSON * cJSON_Duplicate(const cJSON *item, int recurse);
 
 #ifdef __cplusplus
 }

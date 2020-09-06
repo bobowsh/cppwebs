@@ -1,14 +1,17 @@
 /*******************************************************************************
- * Project:  neb
- * @file     CJsonObject.cpp
- * @brief 
- * @author   bwarliao
- * @date:    2014-7-16
- * @note
- * Modify history:
- ******************************************************************************/
+* Project:  neb
+* @file     CJson.cpp
+* @brief 
+* @author   bwarliao
+* @date:    2014-7-16
+* @note
+* Modify history:
+******************************************************************************/
 
 #include "Json.h"
+#include <iostream>
+
+#define INIT_FLAG 0xEB90
 
 #if defined(_MSC_VER) && (_MSC_VER < 1700)
 #define snprintf _snprintf
@@ -16,3507 +19,516 @@
 #endif
 
 CJson::CJson()
-    : m_pJsonData(NULL), m_pExternJsonDataRef(NULL), m_pKeyTravers(NULL)
+: m_pRootData(NULL),  m_pDataPointer(NULL),m_nInitFlag(INIT_FLAG)
 {
-    // m_pJsonData = cJSON_CreateObject();  
+	//CheckRoot();
 }
 
 CJson::CJson(const std::string& strJson)
-    : m_pJsonData(NULL), m_pExternJsonDataRef(NULL), m_pKeyTravers(NULL)
+: m_pRootData(NULL),  m_pDataPointer(NULL),m_nInitFlag(INIT_FLAG)
 {
-    Parse(strJson);
+	Parse(strJson);
 }
 
-CJson::CJson(const CJson* pJsonObject)
-    : m_pJsonData(NULL), m_pExternJsonDataRef(NULL), m_pKeyTravers(NULL)
+CJson::CJson(CJson& rObj)
 {
-    if (pJsonObject)
-    {
-        Parse(pJsonObject->ToString());
-    }
-}
-
-CJson::CJson(const CJson& oJsonObject)
-    : m_pJsonData(NULL), m_pExternJsonDataRef(NULL), m_pKeyTravers(NULL)
-{
-    Parse(oJsonObject.ToString());
+	*this = rObj;
 }
 
 CJson::~CJson()
 {
-    Clear();
+	Clear();
 }
 
-CJson& CJson::operator=(const CJson& oJsonObject)
+CJson& CJson::operator=(CJson& rObj)
 {
-    Parse(oJsonObject.ToString().c_str());
-    return(*this);
+	if(this != &rObj)
+	{		
+		cJSON* pJson = cJSON_Duplicate(rObj.m_pDataPointer,1);
+
+		if(m_pRootData == NULL || m_nInitFlag != INIT_FLAG)//未执行构造函数，指针为非法
+		{
+			m_pRootData = pJson;
+			m_pDataPointer = m_pRootData;
+		}
+		else
+		{	
+			if(m_pDataPointer == NULL)
+				m_pDataPointer = m_pRootData;
+
+			cJSON_SetObjectValue(m_pDataPointer, pJson);
+		}
+		m_pDataPointer = m_pRootData;
+	}
+
+	return(*this);
 }
 
-bool CJson::operator==(const CJson& oJsonObject) const
+
+CJson& CJson::operator[](const char* strKey)
 {
-    return(this->ToString() == oJsonObject.ToString());
+	CheckRoot();
+
+	cJSON* pJsonStruct = NULL;
+	if (m_pDataPointer == NULL)
+		m_pDataPointer = m_pRootData;
+
+	if (m_pRootData != NULL)
+	{
+		pJsonStruct = cJSON_GetObjectItem(m_pRootData, strKey);
+	}
+
+	if(pJsonStruct == NULL)
+	{
+		//默认创建一个对象
+		pJsonStruct = cJSON_CreateNull();
+		cJSON_AddItemToObject(m_pRootData, strKey, pJsonStruct);
+
+	}	
+	m_pDataPointer = pJsonStruct;
+
+	return *this;
 }
 
-bool CJson::AddEmptySubObject(const std::string& strKey)
+CJson& CJson::operator[](int nIndex)
 {
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateObject();
-        m_pKeyTravers = m_pJsonData;
-        pFocusData = m_pJsonData;
-    }
+	CheckRootArray();
+	cJSON* pJsonStruct = NULL;
+	if (m_pDataPointer != NULL)
+	{
+		if (m_pDataPointer->type == cJSON_Array)
+		{
+			pJsonStruct = cJSON_GetArrayItem(m_pDataPointer, nIndex);
+		}
+	}
 
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) != NULL)
-    {
-        m_strErrMsg = "key exists!";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateObject();
-    if (pJsonStruct == NULL)
-    {
-        m_strErrMsg = std::string("create sub empty object error!");
-        return(false);
-    }
-    cJSON_AddItemToObject(pFocusData, strKey.c_str(), pJsonStruct);
-    m_pKeyTravers = pFocusData;
-    return(true);
+	if(pJsonStruct == NULL)
+	{
+		//默认创建一个对象
+		pJsonStruct = cJSON_CreateNull();
+		cJSON_AddItemToArray(m_pDataPointer, pJsonStruct);
+	}	
+
+	m_pDataPointer = pJsonStruct;
+	return *this;
 }
 
-bool CJson::AddEmptySubArray(const std::string& strKey)
+bool CJson::append(int nVal)
 {
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateObject();
-        m_pKeyTravers = m_pJsonData;
-        pFocusData = m_pJsonData;
-    }
+	CheckRootArray();
+	if(m_pDataPointer == NULL)
+		return false;
+	m_pDataPointer->type = cJSON_Array;
+	cJSON* pObj = cJSON_CreateInt(nVal,nVal>0?1:-1);
 
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) != NULL)
-    {
-        m_strErrMsg = "key exists!";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateArray();
-    if (pJsonStruct == NULL)
-    {
-        m_strErrMsg = std::string("create sub empty array error!");
-        return(false);
-    }
-    cJSON_AddItemToObject(pFocusData, strKey.c_str(), pJsonStruct);
-    m_pKeyTravers = pFocusData;
-    return(true);
+	cJSON_AddItemToArray(m_pDataPointer, pObj);
+	m_pDataPointer = m_pRootData;
+	return pObj!=NULL;
 }
 
-bool CJson::GetKey(std::string& strKey)
+bool CJson::append(double nVal)
 {
-    if (IsArray())
-    {
-        return(false);
-    }
-    if (m_pKeyTravers == NULL)
-    {
-        if (m_pJsonData != NULL)
-        {
-            m_pKeyTravers = m_pJsonData;
-        }
-        else if (m_pExternJsonDataRef != NULL)
-        {
-            m_pKeyTravers = m_pExternJsonDataRef;
-        }
-        return(false);
-    }
-    else if (m_pKeyTravers == m_pJsonData || m_pKeyTravers == m_pExternJsonDataRef)
-    {
-        cJSON *c = m_pKeyTravers->child;
-        if (c)
-        {
-            strKey = c->string;
-            m_pKeyTravers = c->next;
-            return(true);
-        }
-        else
-        {
-            return(false);
-        }
-    }
-    else
-    {
-        strKey = m_pKeyTravers->string;
-        m_pKeyTravers = m_pKeyTravers->next;
-        return(true);
-    }
+	CheckRootArray();
+	if(m_pDataPointer == NULL)
+		return false;
+	m_pDataPointer->type = cJSON_Array;
+	cJSON* pObj = cJSON_CreateDouble(nVal,nVal>0?1:-1);
+
+	cJSON_AddItemToArray(m_pDataPointer, pObj);
+	m_pDataPointer = m_pRootData;
+	return pObj!=NULL;
 }
 
-void CJson::ResetTraversing()
+bool CJson::append(bool bVal)
 {
-    if (m_pJsonData != NULL)
-    {
-        m_pKeyTravers = m_pJsonData;
-    }
-    else
-    {
-        m_pKeyTravers = m_pExternJsonDataRef;
-    }
+	CheckRootArray();
+	if(m_pDataPointer == NULL)
+		return false;
+	m_pDataPointer->type = cJSON_Array;
+	cJSON* pObj = cJSON_CreateBool(bVal);
+
+	cJSON_AddItemToArray(m_pDataPointer, pObj);
+	m_pDataPointer = m_pRootData;
+	return pObj!=NULL;
 }
 
-CJson& CJson::operator[](const std::string& strKey)
+bool CJson::append(std::string strVal)
 {
-    std::map<std::string, CJson*>::iterator iter;
-    iter = m_mapJsonObjectRef.find(strKey);
-    if (iter == m_mapJsonObjectRef.end())
-    {
-        cJSON* pJsonStruct = NULL;
-        if (m_pJsonData != NULL)
-        {
-            if (m_pJsonData->type == cJSON_Object)
-            {
-                pJsonStruct = cJSON_GetObjectItem(m_pJsonData, strKey.c_str());
-            }
-        }
-        else if (m_pExternJsonDataRef != NULL)
-        {
-            if (m_pExternJsonDataRef->type == cJSON_Object)
-            {
-                pJsonStruct = cJSON_GetObjectItem(m_pExternJsonDataRef, strKey.c_str());
-            }
-        }
-        if (pJsonStruct == NULL)
-        {
-            CJson* pJsonObject = new CJson();
-            m_mapJsonObjectRef.insert(std::pair<std::string, CJson*>(strKey, pJsonObject));
-            return(*pJsonObject);
-        }
-        else
-        {
-            CJson* pJsonObject = new CJson(pJsonStruct);
-            m_mapJsonObjectRef.insert(std::pair<std::string, CJson*>(strKey, pJsonObject));
-            return(*pJsonObject);
-        }
-    }
-    else
-    {
-        return(*(iter->second));
-    }
+	CheckRootArray();
+	if(m_pDataPointer == NULL)
+		return false;
+	m_pDataPointer->type = cJSON_Array;
+	cJSON* pObj = cJSON_CreateString(strVal.c_str());
+
+	cJSON_AddItemToArray(m_pDataPointer, pObj);
+	m_pDataPointer = m_pRootData;
+	return pObj!=NULL;
 }
 
-CJson& CJson::operator[](unsigned int uiWhich)
+std::string CJson::asString()
 {
-    std::map<unsigned int, CJson*>::iterator iter;
-    iter = m_mapJsonArrayRef.find(uiWhich);
-    if (iter == m_mapJsonArrayRef.end())
-    {
-        cJSON* pJsonStruct = NULL;
-        if (m_pJsonData != NULL)
-        {
-            if (m_pJsonData->type == cJSON_Array)
-            {
-                pJsonStruct = cJSON_GetArrayItem(m_pJsonData, uiWhich);
-            }
-        }
-        else if (m_pExternJsonDataRef != NULL)
-        {
-            if (m_pExternJsonDataRef->type == cJSON_Array)
-            {
-                pJsonStruct = cJSON_GetArrayItem(m_pExternJsonDataRef, uiWhich);
-            }
-        }
-        if (pJsonStruct == NULL)
-        {
-            CJson* pJsonObject = new CJson();
-            m_mapJsonArrayRef.insert(std::pair<unsigned int, CJson*>(uiWhich, pJsonObject));
-            return(*pJsonObject);
-        }
-        else
-        {
-            CJson* pJsonObject = new CJson(pJsonStruct);
-            m_mapJsonArrayRef.insert(std::pair<unsigned int, CJson*>(uiWhich, pJsonObject));
-            return(*pJsonObject);
-        }
-    }
-    else
-    {
-        return(*(iter->second));
-    }
+	if (m_pDataPointer == NULL)
+	{
+		return "";
+	}
+	if (m_pDataPointer->type != cJSON_String)
+	{
+		return "";
+	}
+	cJSON* pJsonStruct = m_pDataPointer;
+
+	m_pDataPointer = m_pRootData;
+
+	return pJsonStruct->valuestring;
 }
 
-std::string CJson::operator()(const std::string& strKey) const
+int CJson::asInt()
 {
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pJsonData, strKey.c_str());
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pExternJsonDataRef, strKey.c_str());
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(std::string(""));
-    }
-    if (pJsonStruct->type == cJSON_String)
-    {
-        return(pJsonStruct->valuestring);
-    }
-    else if (pJsonStruct->type == cJSON_Int)
-    {
-        char szNumber[128] = {0};
-        if (pJsonStruct->sign == -1)
-        {
-            if (pJsonStruct->valueint <= (int64)INT_MAX && (int64)pJsonStruct->valueint >= (int64)INT_MIN)
-            {
-                snprintf(szNumber, sizeof(szNumber), "%d", (int32)pJsonStruct->valueint);
-            }
-            else
-            {
-                snprintf(szNumber, sizeof(szNumber), "%lld", (int64)pJsonStruct->valueint);
-            }
-        }
-        else
-        {
-            if ((uint64)pJsonStruct->valueint <= (uint64)UINT_MAX)
-            {
-                snprintf(szNumber, sizeof(szNumber), "%u", (uint32)pJsonStruct->valueint);
-            }
-            else
-            {
-                snprintf(szNumber, sizeof(szNumber), "%llu", pJsonStruct->valueint);
-            }
-        }
-        return(std::string(szNumber));
-    }
-    else if (pJsonStruct->type == cJSON_Double)
-    {
-        char szNumber[128] = {0};
-        if (fabs(pJsonStruct->valuedouble) < 1.0e-6 || fabs(pJsonStruct->valuedouble) > 1.0e9)
-        {
-            snprintf(szNumber, sizeof(szNumber), "%e", pJsonStruct->valuedouble);
-        }
-        else
-        {
-            snprintf(szNumber, sizeof(szNumber), "%f", pJsonStruct->valuedouble);
-        }
-    }
-    else if (pJsonStruct->type == cJSON_False)
-    {
-        return(std::string("false"));
-    }
-    else if (pJsonStruct->type == cJSON_True)
-    {
-        return(std::string("true"));
-    }
-    return(std::string(""));
+	if (m_pDataPointer == NULL)
+	{
+		return 0;
+	}
+	if (m_pDataPointer->type != cJSON_Int)
+	{
+		return 0;
+	}
+	cJSON* pJsonStruct = m_pDataPointer;
+
+	m_pDataPointer = m_pRootData;
+
+	return pJsonStruct->valueint;
 }
 
-std::string CJson::operator()(unsigned int uiWhich) const
+double CJson::asDouble()
 {
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pJsonData, uiWhich);
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pExternJsonDataRef, uiWhich);
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(std::string(""));
-    }
-    if (pJsonStruct->type == cJSON_String)
-    {
-        return(pJsonStruct->valuestring);
-    }
-    else if (pJsonStruct->type == cJSON_Int)
-    {
-        char szNumber[128] = {0};
-        if (pJsonStruct->sign == -1)
-        {
-            if (pJsonStruct->valueint <= (int64)INT_MAX && (int64)pJsonStruct->valueint >= (int64)INT_MIN)
-            {
-                snprintf(szNumber, sizeof(szNumber), "%d", (int32)pJsonStruct->valueint);
-            }
-            else
-            {
-                snprintf(szNumber, sizeof(szNumber), "%lld", (int64)pJsonStruct->valueint);
-            }
-        }
-        else
-        {
-            if ((uint64)pJsonStruct->valueint <= (uint64)UINT_MAX)
-            {
-                snprintf(szNumber, sizeof(szNumber), "%u", (uint32)pJsonStruct->valueint);
-            }
-            else
-            {
-                snprintf(szNumber, sizeof(szNumber), "%llu", pJsonStruct->valueint);
-            }
-        }
-        return(std::string(szNumber));
-    }
-    else if (pJsonStruct->type == cJSON_Double)
-    {
-        char szNumber[128] = {0};
-        if (fabs(pJsonStruct->valuedouble) < 1.0e-6 || fabs(pJsonStruct->valuedouble) > 1.0e9)
-        {
-            snprintf(szNumber, sizeof(szNumber), "%e", pJsonStruct->valuedouble);
-        }
-        else
-        {
-            snprintf(szNumber, sizeof(szNumber), "%f", pJsonStruct->valuedouble);
-        }
-    }
-    else if (pJsonStruct->type == cJSON_False)
-    {
-        return(std::string("false"));
-    }
-    else if (pJsonStruct->type == cJSON_True)
-    {
-        return(std::string("true"));
-    }
-    return(std::string(""));
+	if (m_pDataPointer == NULL)
+	{
+		return 0;
+	}
+	if (m_pDataPointer->type != cJSON_Double)
+	{
+		return 0;
+	}
+	cJSON* pJsonStruct = m_pDataPointer;
+	m_pDataPointer = m_pRootData;
+
+	return pJsonStruct->valuedouble;
+}
+
+bool CJson::asBool()
+{
+	if (m_pDataPointer == NULL)
+	{
+		return 0;
+	}
+	if (m_pDataPointer->type > cJSON_True)
+	{
+		return false;
+	}
+	cJSON* pJsonStruct = m_pDataPointer;
+	m_pDataPointer = m_pRootData;
+	return pJsonStruct->type==1?true:false;
 }
 
 bool CJson::Parse(const std::string& strJson)
 {
-    Clear();
-    m_pJsonData = cJSON_Parse(strJson.c_str());
-    m_pKeyTravers = m_pJsonData;
-    if (m_pJsonData == NULL)
-    {
-        m_strErrMsg = std::string("prase json string error at ") + cJSON_GetErrorPtr();
-        return(false);
-    }
-    return(true);
+	Clear();
+	m_pRootData = cJSON_Parse(strJson.c_str());
+
+	m_pDataPointer = m_pRootData;
+
+	if (m_pRootData == NULL)
+	{
+		m_strErrMsg = std::string("prase json string error at ") + cJSON_GetErrorPtr();
+		return(false);
+	}
+
+	return(true);
 }
 
 void CJson::Clear()
 {
-    m_pExternJsonDataRef = NULL;
-    m_pKeyTravers = NULL;
-    if (m_pJsonData != NULL)
-    {
-        cJSON_Delete(m_pJsonData);
-        m_pJsonData = NULL;
-    }
-    for (std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.begin();
-                    iter != m_mapJsonArrayRef.end(); ++iter)
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-    }
-    m_mapJsonArrayRef.clear();
-    for (std::map<std::string, CJson*>::iterator iter = m_mapJsonObjectRef.begin();
-                    iter != m_mapJsonObjectRef.end(); ++iter)
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-    }
-    m_mapJsonObjectRef.clear();
+	if (m_pRootData != NULL)
+	{
+		cJSON_Delete(m_pRootData);
+		m_pRootData = NULL;
+		m_pDataPointer = NULL;
+	}
 }
 
-bool CJson::IsEmpty() const
+bool CJson::isNull() const
 {
-    if (m_pJsonData != NULL)
-    {
-        return(false);
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        return(false);
-    }
-    return(true);
+	if (m_pDataPointer == NULL)
+	{
+		return true;
+	}
+
+	if(m_pDataPointer->type == cJSON_NULL)
+		return true;
+
+	return false;
 }
 
-bool CJson::IsArray() const
+bool CJson::isBool() const
 {
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
+	if (m_pDataPointer == NULL)
+	{
+		return false;
+	}
 
-    if (pFocusData == NULL)
-    {
-        return(false);
-    }
+	if(m_pDataPointer->type == cJSON_True || 
+		m_pDataPointer->type == cJSON_False)
+		return true;
 
-    if (pFocusData->type == cJSON_Array)
-    {
-        return(true);
-    }
-    else
-    {
-        return(false);
-    }
+	return false;
 }
 
-std::string CJson::ToString() const
+bool CJson::isInt() const
 {
-    char* pJsonString = NULL;
-    std::string strJsonData = "";
-    if (m_pJsonData != NULL)
-    {
-        pJsonString = cJSON_PrintUnformatted(m_pJsonData);
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pJsonString = cJSON_PrintUnformatted(m_pExternJsonDataRef);
-    }
-    if (pJsonString != NULL)
-    {
-        strJsonData = pJsonString;
-        free(pJsonString);
-    }
-    return(strJsonData);
+	if (m_pDataPointer == NULL)
+	{
+		return false;
+	}
+
+	if(m_pDataPointer->type == cJSON_Int)
+		return true;
+
+	return false;
 }
 
-std::string CJson::ToFormattedString() const
+bool CJson::isDouble() const
 {
-    char* pJsonString = NULL;
-    std::string strJsonData = "";
-    if (m_pJsonData != NULL)
-    {
-        pJsonString = cJSON_Print(m_pJsonData);
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pJsonString = cJSON_Print(m_pExternJsonDataRef);
-    }
-    if (pJsonString != NULL)
-    {
-        strJsonData = pJsonString;
-        free(pJsonString);
-    }
-    return(strJsonData);
+	if (m_pDataPointer == NULL)
+	{
+		return false;
+	}
+
+	if(m_pDataPointer->type == cJSON_Double)
+		return true;
+
+	return false;
+}
+
+bool CJson::isString() const
+{
+	if (m_pDataPointer == NULL)
+	{
+		return false;
+	}
+
+	if(m_pDataPointer->type == cJSON_String)
+		return true;
+
+	return false;
+}
+
+bool CJson::isArray() const
+{
+	if (m_pDataPointer == NULL)
+	{
+		return false;
+	}
+
+	if(m_pDataPointer->type == cJSON_Array)
+		return true;
+
+	return false;
+}
+
+bool CJson::isObject() const
+{
+	if (m_pDataPointer == NULL)
+	{
+		return false;
+	}
+
+	if(m_pDataPointer->type == cJSON_Object)
+		return true;
+
+	return false;
+}
+
+std::string CJson::toString() const
+{
+	char* pJsonString = NULL;
+	std::string strJsonData = "";
+	if (m_pRootData != NULL)
+	{
+		pJsonString = cJSON_PrintUnformatted(m_pRootData);
+	}
+	if (pJsonString != NULL)
+	{
+		strJsonData = pJsonString;
+		free(pJsonString);
+	}
+	return(strJsonData);
+}
+
+std::string CJson::toStyledString() const
+{
+	char* pJsonString = NULL;
+	std::string strJsonData = "";
+	if (m_pRootData != NULL)
+	{
+		pJsonString = cJSON_Print(m_pRootData);
+	}
+
+	if (pJsonString != NULL)
+	{
+		strJsonData = pJsonString;
+		free(pJsonString);
+	}
+	return(strJsonData);
 }
 
 
-const std::string& CJson::GetErrMsg() const
+int CJson::size()
+{
+	return cJSON_GetArraySize(m_pDataPointer);
+}
+
+const std::string& CJson::getError() const
 {
 	return(m_strErrMsg);
 }
 
-bool CJson::Get(const std::string& strKey, CJson& oJsonObject) const
+void CJson::CheckRoot()
 {
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pJsonData, strKey.c_str());
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pExternJsonDataRef, strKey.c_str());
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    char* pJsonString = cJSON_Print(pJsonStruct);
-    std::string strJsonData = pJsonString;
-    free(pJsonString);
-    if (oJsonObject.Parse(strJsonData))
-    {
-        return(true);
-    }
-    else
-    {
-        return(false);
-    }
+	if (m_pRootData == NULL)
+	{
+		m_pRootData = cJSON_CreateObject();
+		m_pDataPointer = m_pRootData;
+	}
 }
 
-bool CJson::Get(const std::string& strKey, std::string& strValue) const
+void CJson::CheckRootArray()
 {
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pJsonData, strKey.c_str());
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pExternJsonDataRef, strKey.c_str());
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type != cJSON_String)
-    {
-        return(false);
-    }
-    strValue = pJsonStruct->valuestring;
-    return(true);
-}
-
-bool CJson::Get(const std::string& strKey, int32& iValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pJsonData, strKey.c_str());
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pExternJsonDataRef, strKey.c_str());
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type == cJSON_Int)
-    {
-        iValue = (int32)(pJsonStruct->valueint);
-        return(true);
-    }
-    else if (pJsonStruct->type == cJSON_Double)
-    {
-        iValue = (int32)(pJsonStruct->valuedouble);
-        return(true);
-    }
-    return(false);
-}
-
-bool CJson::Get(const std::string& strKey, uint32& uiValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pJsonData, strKey.c_str());
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pExternJsonDataRef, strKey.c_str());
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type == cJSON_Int)
-    {
-        uiValue = (uint32)(pJsonStruct->valueint);
-        return(true);
-    }
-    else if (pJsonStruct->type == cJSON_Double)
-    {
-        uiValue = (uint32)(pJsonStruct->valuedouble);
-        return(true);
-    }
-    return(false);
-}
-
-bool CJson::Get(const std::string& strKey, int64& llValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pJsonData, strKey.c_str());
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pExternJsonDataRef, strKey.c_str());
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type == cJSON_Int)
-    {
-        llValue = (int64)(pJsonStruct->valueint);
-        return(true);
-    }
-    else if (pJsonStruct->type == cJSON_Double)
-    {
-        llValue = (int64)(pJsonStruct->valuedouble);
-        return(true);
-    }
-    return(false);
-}
-
-bool CJson::Get(const std::string& strKey, uint64& ullValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pJsonData, strKey.c_str());
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pExternJsonDataRef, strKey.c_str());
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type == cJSON_Int)
-    {
-        ullValue = (uint64)(pJsonStruct->valueint);
-        return(true);
-    }
-    else if (pJsonStruct->type == cJSON_Double)
-    {
-        ullValue = (uint64)(pJsonStruct->valuedouble);
-        return(true);
-    }
-    return(false);
-}
-
-bool CJson::Get(const std::string& strKey, bool& bValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pJsonData, strKey.c_str());
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pExternJsonDataRef, strKey.c_str());
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type > cJSON_True)
-    {
-        return(false);
-    }
-    bValue = pJsonStruct->type;
-    return(true);
-}
-
-bool CJson::Get(const std::string& strKey, float& fValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pJsonData, strKey.c_str());
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pExternJsonDataRef, strKey.c_str());
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type == cJSON_Double || pJsonStruct->type == cJSON_Int)
-    {
-        fValue = (float)(pJsonStruct->valuedouble);
-        return(true);
-    }
-    return(false);
-}
-
-bool CJson::Get(const std::string& strKey, double& dValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pJsonData, strKey.c_str());
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pExternJsonDataRef, strKey.c_str());
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type == cJSON_Double || pJsonStruct->type == cJSON_Int)
-    {
-        dValue = pJsonStruct->valuedouble;
-        return(true);
-    }
-    return(false);
-}
-
-bool CJson::IsNull(const std::string& strKey) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pJsonData, strKey.c_str());
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Object)
-        {
-            pJsonStruct = cJSON_GetObjectItem(m_pExternJsonDataRef, strKey.c_str());
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type != cJSON_NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Add(const std::string& strKey, const CJson& oJsonObject)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateObject();
-        m_pKeyTravers = m_pJsonData;
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) != NULL)
-    {
-        m_strErrMsg = "key exists!";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_Parse(oJsonObject.ToString().c_str());
-    if (pJsonStruct == NULL)
-    {
-        m_strErrMsg = std::string("prase json string error at ") + cJSON_GetErrorPtr();
-        return(false);
-    }
-    cJSON_AddItemToObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    std::map<std::string, CJson*>::iterator iter = m_mapJsonObjectRef.find(strKey);
-    if (iter != m_mapJsonObjectRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonObjectRef.erase(iter);
-    }
-    m_pKeyTravers = pFocusData;
-    return(true);
-}
-
-bool CJson::Add(const std::string& strKey, const std::string& strValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateObject();
-        m_pKeyTravers = m_pJsonData;
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) != NULL)
-    {
-        m_strErrMsg = "key exists!";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateString(strValue.c_str());
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    cJSON_AddItemToObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    m_pKeyTravers = pFocusData;
-    return(true);
-}
-
-bool CJson::Add(const std::string& strKey, int32 iValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateObject();
-        m_pKeyTravers = m_pJsonData;
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) != NULL)
-    {
-        m_strErrMsg = "key exists!";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)iValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    cJSON_AddItemToObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    m_pKeyTravers = pFocusData;
-    return(true);
-}
-
-bool CJson::Add(const std::string& strKey, uint32 uiValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateObject();
-        m_pKeyTravers = m_pJsonData;
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) != NULL)
-    {
-        m_strErrMsg = "key exists!";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)uiValue, 1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    cJSON_AddItemToObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    m_pKeyTravers = pFocusData;
-    return(true);
-}
-
-bool CJson::Add(const std::string& strKey, int64 llValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateObject();
-        m_pKeyTravers = m_pJsonData;
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) != NULL)
-    {
-        m_strErrMsg = "key exists!";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)llValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    cJSON_AddItemToObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    m_pKeyTravers = pFocusData;
-    return(true);
-}
-
-bool CJson::Add(const std::string& strKey, uint64 ullValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateObject();
-        m_pKeyTravers = m_pJsonData;
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) != NULL)
-    {
-        m_strErrMsg = "key exists!";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt(ullValue, 1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    cJSON_AddItemToObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    m_pKeyTravers = pFocusData;
-    return(true);
-}
-
-bool CJson::Add(const std::string& strKey, bool bValue, bool bValueAgain)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateObject();
-        m_pKeyTravers = m_pJsonData;
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) != NULL)
-    {
-        m_strErrMsg = "key exists!";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateBool(bValue);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    cJSON_AddItemToObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    m_pKeyTravers = pFocusData;
-    return(true);
-}
-
-bool CJson::Add(const std::string& strKey, float fValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateObject();
-        m_pKeyTravers = m_pJsonData;
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) != NULL)
-    {
-        m_strErrMsg = "key exists!";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateDouble((double)fValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    cJSON_AddItemToObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    m_pKeyTravers = pFocusData;
-    return(true);
-}
-
-bool CJson::Add(const std::string& strKey, double dValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateObject();
-        m_pKeyTravers = m_pJsonData;
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) != NULL)
-    {
-        m_strErrMsg = "key exists!";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateDouble((double)dValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    cJSON_AddItemToObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    m_pKeyTravers = pFocusData;
-    return(true);
-}
-
-bool CJson::AddNull(const std::string& strKey)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateObject();
-        m_pKeyTravers = m_pJsonData;
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) != NULL)
-    {
-        m_strErrMsg = "key exists!";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateNull();
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    cJSON_AddItemToObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    m_pKeyTravers = pFocusData;
-    return(true);
-}
-
-bool CJson::Delete(const std::string& strKey)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    cJSON_DeleteItemFromObject(pFocusData, strKey.c_str());
-    std::map<std::string, CJson*>::iterator iter = m_mapJsonObjectRef.find(strKey);
-    if (iter != m_mapJsonObjectRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonObjectRef.erase(iter);
-    }
-    m_pKeyTravers = pFocusData;
-    return(true);
-}
-
-bool CJson::Replace(const std::string& strKey, const CJson& oJsonObject)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_Parse(oJsonObject.ToString().c_str());
-    if (pJsonStruct == NULL)
-    {
-        m_strErrMsg = std::string("prase json string error at ") + cJSON_GetErrorPtr();
-        return(false);
-    }
-    cJSON_ReplaceItemInObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    std::map<std::string, CJson*>::iterator iter = m_mapJsonObjectRef.find(strKey);
-    if (iter != m_mapJsonObjectRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonObjectRef.erase(iter);
-    }
-    return(true);
-}
-
-bool CJson::Replace(const std::string& strKey, const std::string& strValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateString(strValue.c_str());
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<std::string, CJson*>::iterator iter = m_mapJsonObjectRef.find(strKey);
-    if (iter != m_mapJsonObjectRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonObjectRef.erase(iter);
-    }
-    cJSON_ReplaceItemInObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Replace(const std::string& strKey, int32 iValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)iValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<std::string, CJson*>::iterator iter = m_mapJsonObjectRef.find(strKey);
-    if (iter != m_mapJsonObjectRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonObjectRef.erase(iter);
-    }
-    cJSON_ReplaceItemInObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Replace(const std::string& strKey, uint32 uiValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)uiValue, 1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<std::string, CJson*>::iterator iter = m_mapJsonObjectRef.find(strKey);
-    if (iter != m_mapJsonObjectRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonObjectRef.erase(iter);
-    }
-    cJSON_ReplaceItemInObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Replace(const std::string& strKey, int64 llValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)llValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<std::string, CJson*>::iterator iter = m_mapJsonObjectRef.find(strKey);
-    if (iter != m_mapJsonObjectRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonObjectRef.erase(iter);
-    }
-    cJSON_ReplaceItemInObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Replace(const std::string& strKey, uint64 ullValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)ullValue, 1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<std::string, CJson*>::iterator iter = m_mapJsonObjectRef.find(strKey);
-    if (iter != m_mapJsonObjectRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonObjectRef.erase(iter);
-    }
-    cJSON_ReplaceItemInObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Replace(const std::string& strKey, bool bValue, bool bValueAgain)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateBool(bValue);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<std::string, CJson*>::iterator iter = m_mapJsonObjectRef.find(strKey);
-    if (iter != m_mapJsonObjectRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonObjectRef.erase(iter);
-    }
-    cJSON_ReplaceItemInObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Replace(const std::string& strKey, float fValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateDouble((double)fValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<std::string, CJson*>::iterator iter = m_mapJsonObjectRef.find(strKey);
-    if (iter != m_mapJsonObjectRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonObjectRef.erase(iter);
-    }
-    cJSON_ReplaceItemInObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Replace(const std::string& strKey, double dValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateDouble((double)dValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<std::string, CJson*>::iterator iter = m_mapJsonObjectRef.find(strKey);
-    if (iter != m_mapJsonObjectRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonObjectRef.erase(iter);
-    }
-    cJSON_ReplaceItemInObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::ReplaceWithNull(const std::string& strKey)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Object)
-    {
-        m_strErrMsg = "not a json object! json array?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateNull();
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<std::string, CJson*>::iterator iter = m_mapJsonObjectRef.find(strKey);
-    if (iter != m_mapJsonObjectRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonObjectRef.erase(iter);
-    }
-    cJSON_ReplaceItemInObject(pFocusData, strKey.c_str(), pJsonStruct);
-    if (cJSON_GetObjectItem(pFocusData, strKey.c_str()) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-int CJson::GetArraySize()
-{
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Array)
-        {
-            return(cJSON_GetArraySize(m_pJsonData));
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Array)
-        {
-            return(cJSON_GetArraySize(m_pExternJsonDataRef));
-        }
-    }
-    return(0);
-}
-
-bool CJson::Get(int iWhich, CJson& oJsonObject) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pJsonData, iWhich);
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pExternJsonDataRef, iWhich);
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    char* pJsonString = cJSON_Print(pJsonStruct);
-    std::string strJsonData = pJsonString;
-    free(pJsonString);
-    if (oJsonObject.Parse(strJsonData))
-    {
-        return(true);
-    }
-    else
-    {
-        return(false);
-    }
-}
-
-bool CJson::Get(int iWhich, std::string& strValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pJsonData, iWhich);
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pExternJsonDataRef, iWhich);
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type != cJSON_String)
-    {
-        return(false);
-    }
-    strValue = pJsonStruct->valuestring;
-    return(true);
-}
-
-bool CJson::Get(int iWhich, int32& iValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pJsonData, iWhich);
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pExternJsonDataRef, iWhich);
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type == cJSON_Int)
-    {
-        iValue = (int32)(pJsonStruct->valueint);
-        return(true);
-    }
-    else if (pJsonStruct->type == cJSON_Double)
-    {
-        iValue = (int32)(pJsonStruct->valuedouble);
-        return(true);
-    }
-    return(false);
-}
-
-bool CJson::Get(int iWhich, uint32& uiValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pJsonData, iWhich);
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pExternJsonDataRef, iWhich);
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type == cJSON_Int)
-    {
-        uiValue = (uint32)(pJsonStruct->valueint);
-        return(true);
-    }
-    else if (pJsonStruct->type == cJSON_Double)
-    {
-        uiValue = (uint32)(pJsonStruct->valuedouble);
-        return(true);
-    }
-    return(false);
-}
-
-bool CJson::Get(int iWhich, int64& llValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pJsonData, iWhich);
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pExternJsonDataRef, iWhich);
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type == cJSON_Int)
-    {
-        llValue = (int64)(pJsonStruct->valueint);
-        return(true);
-    }
-    else if (pJsonStruct->type == cJSON_Double)
-    {
-        llValue = (int64)(pJsonStruct->valuedouble);
-        return(true);
-    }
-    return(false);
-}
-
-bool CJson::Get(int iWhich, uint64& ullValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pJsonData, iWhich);
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pExternJsonDataRef, iWhich);
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type == cJSON_Int)
-    {
-        ullValue = (uint64)(pJsonStruct->valueint);
-        return(true);
-    }
-    else if (pJsonStruct->type == cJSON_Double)
-    {
-        ullValue = (uint64)(pJsonStruct->valuedouble);
-        return(true);
-    }
-    return(false);
-}
-
-bool CJson::Get(int iWhich, bool& bValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pJsonData, iWhich);
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pExternJsonDataRef, iWhich);
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type > cJSON_True)
-    {
-        return(false);
-    }
-    bValue = pJsonStruct->type;
-    return(true);
-}
-
-bool CJson::Get(int iWhich, float& fValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pJsonData, iWhich);
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pExternJsonDataRef, iWhich);
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type == cJSON_Double || pJsonStruct->type == cJSON_Int)
-    {
-        fValue = (float)(pJsonStruct->valuedouble);
-        return(true);
-    }
-    return(false);
-}
-
-bool CJson::Get(int iWhich, double& dValue) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pJsonData, iWhich);
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pExternJsonDataRef, iWhich);
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type == cJSON_Double || pJsonStruct->type == cJSON_Int)
-    {
-        dValue = pJsonStruct->valuedouble;
-        return(true);
-    }
-    return(false);
-}
-
-bool CJson::IsNull(int iWhich) const
-{
-    cJSON* pJsonStruct = NULL;
-    if (m_pJsonData != NULL)
-    {
-        if (m_pJsonData->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pJsonData, iWhich);
-        }
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        if(m_pExternJsonDataRef->type == cJSON_Array)
-        {
-            pJsonStruct = cJSON_GetArrayItem(m_pExternJsonDataRef, iWhich);
-        }
-    }
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    if (pJsonStruct->type != cJSON_NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Add(const CJson& oJsonObject)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_Parse(oJsonObject.ToString().c_str());
-    if (pJsonStruct == NULL)
-    {
-        m_strErrMsg = std::string("prase json string error at ") + cJSON_GetErrorPtr();
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArray(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    unsigned int uiLastIndex = (unsigned int)cJSON_GetArraySize(pFocusData) - 1;
-    for (std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.begin();
-                    iter != m_mapJsonArrayRef.end(); )
-    {
-        if (iter->first >= uiLastIndex)
-        {
-            if (iter->second != NULL)
-            {
-                delete (iter->second);
-                iter->second = NULL;
-            }
-            m_mapJsonArrayRef.erase(iter++);
-        }
-        else
-        {
-            iter++;
-        }
-    }
-    return(true);
-}
-
-bool CJson::Add(const std::string& strValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateString(strValue.c_str());
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArray(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Add(int32 iValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)iValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArray(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Add(uint32 uiValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)uiValue, 1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArray(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Add(int64 llValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)llValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArray(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Add(uint64 ullValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)ullValue, 1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArray(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
-}
+	if (m_pRootData == NULL)
+	{
+		m_pRootData = cJSON_CreateArray();
+		m_pDataPointer = m_pRootData;
+	}
 
-bool CJson::Add(int iAnywhere, bool bValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateBool(bValue);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArray(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Add(float fValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateDouble((double)fValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArray(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::Add(double dValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateDouble((double)dValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArray(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
-}
-
-bool CJson::AddNull()
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateNull();
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArray(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
+	if (m_pDataPointer->type != cJSON_Array)
+	{
+		m_pDataPointer->type = cJSON_Array;
+	}
 }
 
-bool CJson::AddAsFirst(const CJson& oJsonObject)
+bool CJson::isMember(const std::string& strKey)
 {
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_Parse(oJsonObject.ToString().c_str());
-    if (pJsonStruct == NULL)
-    {
-        m_strErrMsg = std::string("prase json string error at ") + cJSON_GetErrorPtr();
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArrayHead(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    for (std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.begin();
-                    iter != m_mapJsonArrayRef.end(); )
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonArrayRef.erase(iter++);
-    }
-    return(true);
+	cJSON* pJsonStruct = NULL;
+	if (m_pDataPointer != NULL)
+	{
+		pJsonStruct = cJSON_GetObjectItem(m_pDataPointer, strKey.c_str());
+	}
+	if (pJsonStruct == NULL)
+	{
+		return(false);
+	}
+	return(true);
 }
 
-bool CJson::AddAsFirst(const std::string& strValue)
+CJson& CJson::operator=(const char* strValue)
 {
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateString(strValue.c_str());
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArrayHead(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
+	cJSON_SetValuestring(m_pDataPointer, strValue);
+	m_pDataPointer = m_pRootData;
+	return *this;
 }
 
-bool CJson::AddAsFirst(int32 iValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)iValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArrayHead(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
-}
 
-bool CJson::AddAsFirst(uint32 uiValue)
+CJson& CJson::operator=(int nVal)
 {
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)uiValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArrayHead(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
+	cJSON_SetIntValue(m_pDataPointer, nVal);
+	m_pDataPointer = m_pRootData;
+	return *this;
 }
 
-bool CJson::AddAsFirst(int64 llValue)
+CJson& CJson::operator=(double nVal)
 {
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)llValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArrayHead(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
+	cJSON_SetDoubleValue(m_pDataPointer, nVal);
+	m_pDataPointer = m_pRootData;
+	return *this;
 }
 
-bool CJson::AddAsFirst(uint64 ullValue)
+CJson& CJson::operator=(bool bVal)
 {
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
-
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)ullValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArrayHead(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
+	cJSON_SetBoolValue(m_pDataPointer, bVal);
+	m_pDataPointer = m_pRootData;
+	return *this;
 }
 
-bool CJson::AddAsFirst(int iAnywhere, bool bValue)
+void testjson()
 {
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
+	std::string strjson;	
+	{
+		//简单写
+		CJson root, fruit, mail;
 
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateBool(bValue);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArrayHead(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
-}
 
-bool CJson::AddAsFirst(float fValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
+		root["Name"] = "wangshuai";
+		root["Age"] = 25;
+		root["gender"] = "man";
+		root["money"] = 3000.1;
+		root["task"] = true;
 
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateDouble((double)fValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArrayHead(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
-}
+		fruit[0] = "apple";
+		fruit[1] = "orange";
+		fruit[2] = "banana";
+		fruit[3] = 123;
+		root["fruit"] = fruit;
 
-bool CJson::AddAsFirst(double dValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
+		mail["QQ"] = "XXX@qq.com";
+		mail["gmail"] = "XXX@gmail.com";
 
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateDouble((double)dValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArrayHead(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
-}
+		std::cout << mail.toStyledString() << std::endl;
 
-bool CJson::AddNullAsFirst()
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData != NULL)
-    {
-        pFocusData = m_pJsonData;
-    }
-    else if (m_pExternJsonDataRef != NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        m_pJsonData = cJSON_CreateArray();
-        pFocusData = m_pJsonData;
-    }
 
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateNull();
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    int iArraySizeBeforeAdd = cJSON_GetArraySize(pFocusData);
-    cJSON_AddItemToArrayHead(pFocusData, pJsonStruct);
-    int iArraySizeAfterAdd = cJSON_GetArraySize(pFocusData);
-    if (iArraySizeAfterAdd == iArraySizeBeforeAdd)
-    {
-        return(false);
-    }
-    return(true);
-}
 
-bool CJson::Delete(int iWhich)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON_DeleteItemFromArray(pFocusData, iWhich);
-    for (std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.begin();
-                    iter != m_mapJsonArrayRef.end(); )
-    {
-        if (iter->first >= (unsigned int)iWhich)
-        {
-            if (iter->second != NULL)
-            {
-                delete (iter->second);
-                iter->second = NULL;
-            }
-            m_mapJsonArrayRef.erase(iter++);
-        }
-        else
-        {
-            iter++;
-        }
-    }
-    return(true);
-}
+		root["mail"] = mail;
 
-bool CJson::Replace(int iWhich, const CJson& oJsonObject)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_Parse(oJsonObject.ToString().c_str());
-    if (pJsonStruct == NULL)
-    {
-        m_strErrMsg = std::string("prase json string error at ") + cJSON_GetErrorPtr();
-        return(false);
-    }
-    cJSON_ReplaceItemInArray(pFocusData, iWhich, pJsonStruct);
-    if (cJSON_GetArrayItem(pFocusData, iWhich) == NULL)
-    {
-        return(false);
-    }
-    std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.find(iWhich);
-    if (iter != m_mapJsonArrayRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonArrayRef.erase(iter);
-    }
-    return(true);
-}
+		std::cout << root.toStyledString() << std::endl;
+		root["fruit"][0] = "strawberry";
+		strjson = root.toString();
+		std::cout << root.toString()<< std::endl;
+	}
+	{
+		CJson root, fruit, mail;
 
-bool CJson::Replace(int iWhich, const std::string& strValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateString(strValue.c_str());
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.find(iWhich);
-    if (iter != m_mapJsonArrayRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonArrayRef.erase(iter);
-    }
-    cJSON_ReplaceItemInArray(pFocusData, iWhich, pJsonStruct);
-    if (cJSON_GetArrayItem(pFocusData, iWhich) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
+		root.Parse(strjson);
+		int iage = 0;
+		std::string sname;
 
-bool CJson::Replace(int iWhich, int32 iValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)iValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.find(iWhich);
-    if (iter != m_mapJsonArrayRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonArrayRef.erase(iter);
-    }
-    cJSON_ReplaceItemInArray(pFocusData, iWhich, pJsonStruct);
-    if (cJSON_GetArrayItem(pFocusData, iWhich) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
+		iage = root["Age"].asInt();
+		sname = root["Name"].asString();
+		fruit = root["fruit"];
+		mail = root["mail"];
 
-bool CJson::Replace(int iWhich, uint32 uiValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)uiValue, 1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.find(iWhich);
-    if (iter != m_mapJsonArrayRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonArrayRef.erase(iter);
-    }
-    cJSON_ReplaceItemInArray(pFocusData, iWhich, pJsonStruct);
-    if (cJSON_GetArrayItem(pFocusData, iWhich) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
+		std::cout << "age: " << iage << std::endl;
+		std::cout << "name: " << sname << std::endl;
+		std::cout << "fruit: " << fruit[0].asString() <<" "<< fruit[1].asString()<<" " << fruit[2].asString() << std::endl;
+		std::cout << "mailqq: " << mail["QQ"].asString() << std::endl;
+	}
 
-bool CJson::Replace(int iWhich, int64 llValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)((uint64)llValue), -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.find(iWhich);
-    if (iter != m_mapJsonArrayRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonArrayRef.erase(iter);
-    }
-    cJSON_ReplaceItemInArray(pFocusData, iWhich, pJsonStruct);
-    if (cJSON_GetArrayItem(pFocusData, iWhich) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
+	{
+		std::string strValue = "{\"key1\":\"value1\",\"array\":[{\"key2\":\"value2\"},{\"key2\":\"value3\"},{\"key2\":\"value4\"}]}";
 
-bool CJson::Replace(int iWhich, uint64 ullValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateInt((uint64)ullValue, 1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.find(iWhich);
-    if (iter != m_mapJsonArrayRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonArrayRef.erase(iter);
-    }
-    cJSON_ReplaceItemInArray(pFocusData, iWhich, pJsonStruct);
-    if (cJSON_GetArrayItem(pFocusData, iWhich) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
+		CJson root(strValue);
 
-bool CJson::Replace(int iWhich, bool bValue, bool bValueAgain)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateBool(bValue);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.find(iWhich);
-    if (iter != m_mapJsonArrayRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonArrayRef.erase(iter);
-    }
-    cJSON_ReplaceItemInArray(pFocusData, iWhich, pJsonStruct);
-    if (cJSON_GetArrayItem(pFocusData, iWhich) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
+		strjson = root.toStyledString();
 
-bool CJson::Replace(int iWhich, float fValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateDouble((double)fValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.find(iWhich);
-    if (iter != m_mapJsonArrayRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonArrayRef.erase(iter);
-    }
-    cJSON_ReplaceItemInArray(pFocusData, iWhich, pJsonStruct);
-    if (cJSON_GetArrayItem(pFocusData, iWhich) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
+		std::cout <<"key1: "<< root["key1"].asString() << std::endl;
 
-bool CJson::Replace(int iWhich, double dValue)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateDouble((double)dValue, -1);
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.find(iWhich);
-    if (iter != m_mapJsonArrayRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonArrayRef.erase(iter);
-    }
-    cJSON_ReplaceItemInArray(pFocusData, iWhich, pJsonStruct);
-    if (cJSON_GetArrayItem(pFocusData, iWhich) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
+		CJson arrayObj = root["array"];
+		int nSize = arrayObj.size();
+		for (int i=0; i<nSize; i++)
+		{
+			std::cout << arrayObj[i]["key2"].asString();
+			if (i != nSize - 1 )
+				  std::cout << std::endl;
+		}
+	}
 
-bool CJson::ReplaceWithNull(int iWhich)
-{
-    cJSON* pFocusData = NULL;
-    if (m_pJsonData == NULL)
-    {
-        pFocusData = m_pExternJsonDataRef;
-    }
-    else
-    {
-        pFocusData = m_pJsonData;
-    }
-    if (pFocusData == NULL)
-    {
-        m_strErrMsg = "json data is null!";
-        return(false);
-    }
-    if (pFocusData->type != cJSON_Array)
-    {
-        m_strErrMsg = "not a json array! json object?";
-        return(false);
-    }
-    cJSON* pJsonStruct = cJSON_CreateNull();
-    if (pJsonStruct == NULL)
-    {
-        return(false);
-    }
-    std::map<unsigned int, CJson*>::iterator iter = m_mapJsonArrayRef.find(iWhich);
-    if (iter != m_mapJsonArrayRef.end())
-    {
-        if (iter->second != NULL)
-        {
-            delete (iter->second);
-            iter->second = NULL;
-        }
-        m_mapJsonArrayRef.erase(iter);
-    }
-    cJSON_ReplaceItemInArray(pFocusData, iWhich, pJsonStruct);
-    if (cJSON_GetArrayItem(pFocusData, iWhich) == NULL)
-    {
-        return(false);
-    }
-    return(true);
-}
 
-CJson::CJson(cJSON* pJsonData)
-    : m_pJsonData(NULL), m_pExternJsonDataRef(pJsonData), m_pKeyTravers(pJsonData)
-{
+	getchar();
 }

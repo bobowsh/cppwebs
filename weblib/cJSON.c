@@ -1089,3 +1089,164 @@ cJSON *cJSON_CreateStringArray(const char **strings, int count)
     return a;
 }
 
+
+cJSON* cJSON_SetValuestring(cJSON *object, const char *valuestring)
+{
+	char *copy = NULL;
+	if(object == NULL)
+		return NULL;
+	object->type= cJSON_String;
+	if (object->valuestring && (strlen(valuestring) <= strlen(object->valuestring)))
+	{
+		strcpy(object->valuestring, valuestring);
+		return object->valuestring;
+	}
+	copy = (char*) cJSON_strdup((const unsigned char*)valuestring);
+	if (copy == NULL)
+	{
+		return NULL;
+	}
+	if (object->valuestring != NULL)
+	{
+		cJSON_free(object->valuestring);
+	}
+	object->valuestring = copy;
+
+	return object;
+}
+
+cJSON* cJSON_SetIntValue(cJSON *object, int nVal)
+{
+	if(object == NULL)
+		return NULL;
+
+	object->type = cJSON_Int;
+
+	object->valueint = nVal;
+	object->valuedouble = nVal;
+	return object;
+}
+cJSON* cJSON_SetDoubleValue(cJSON *object, double nVal)
+{
+	if(object == NULL)
+		return NULL;
+
+	object->type = cJSON_Double;
+
+	object->valueint = nVal;
+	object->valuedouble = nVal;
+	return object;
+}
+cJSON* cJSON_SetBoolValue(cJSON *object, uint32 bVal)
+{
+	if(object == NULL)
+		return NULL;
+
+	object->type = bVal?cJSON_True:cJSON_False;
+	return object;
+}
+
+cJSON* cJSON_SetObjectValue(cJSON *object, cJSON *newitem)
+{
+	cJSON *c = object;	
+	
+	if(object == NULL || newitem == NULL)
+		return NULL;
+
+	if(c->prev && c->prev->next)
+		c->prev->next = newitem;
+    newitem->next = c->next;
+    newitem->prev = c->prev;
+    if (newitem->next)
+        newitem->next->prev = newitem;
+	if(c->string)
+	newitem->string = cJSON_strdup(c->string);
+    c->next = c->prev = 0;
+    cJSON_Delete(c);
+	return newitem;
+}
+
+/* Duplication */
+cJSON * cJSON_Duplicate(const cJSON *item, int recurse)
+{
+	cJSON *newitem = NULL;
+	cJSON *child = NULL;
+	cJSON *next = NULL;
+	cJSON *newchild = NULL;
+
+	/* Bail on bad ptr */
+	if (!item)
+	{
+		goto fail;
+	}
+	/* Create new item */
+	newitem = cJSON_New_Item();
+	if (!newitem)
+	{
+		goto fail;
+	}
+	/* Copy over all vars */
+	newitem->type = item->type;
+	newitem->valueint = item->valueint;
+	newitem->valuedouble = item->valuedouble;
+	if (item->valuestring)
+	{
+		newitem->valuestring = (char*)cJSON_strdup((unsigned char*)item->valuestring);
+		if (!newitem->valuestring)
+		{
+			goto fail;
+		}
+	}
+	if (item->string)
+	{
+		newitem->string = (char*)cJSON_strdup((unsigned char*)item->string);
+		if (!newitem->string)
+		{
+			goto fail;
+		}
+	}
+	/* If non-recursive, then we're done! */
+	if (!recurse)
+	{
+		return newitem;
+	}
+	/* Walk the ->next chain for the child. */
+	child = item->child;
+	while (child != NULL)
+	{
+		newchild = cJSON_Duplicate(child, 1); /* Duplicate (with recurse) each item in the ->next chain */
+		if (!newchild)
+		{
+			goto fail;
+		}
+		if (next != NULL)
+		{
+			/* If newitem->child already set, then crosswire ->prev and ->next and move on */
+			next->next = newchild;
+			newchild->prev = next;
+			next = newchild;
+		}
+		else
+		{
+			/* Set newitem->child and move to it */
+			newitem->child = newchild;
+			next = newchild;
+		}
+		child = child->next;
+	}
+	if (newitem && newitem->child)
+	{
+		newitem->child->prev = newchild;
+	}
+
+	return newitem;
+
+fail:
+	if (newitem != NULL)
+	{
+		cJSON_Delete(newitem);
+	}
+
+	return NULL;
+}
+
