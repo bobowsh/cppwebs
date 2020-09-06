@@ -59,6 +59,7 @@ CJson& CJson::operator=(CJson& rObj)
 			cJSON_SetObjectValue(m_pDataPointer, pJson);
 		}
 		m_pDataPointer = m_pRootData;
+		rObj.m_pDataPointer = rObj.m_pRootData;
 	}
 
 	return(*this);
@@ -73,16 +74,16 @@ CJson& CJson::operator[](const char* strKey)
 	if (m_pDataPointer == NULL)
 		m_pDataPointer = m_pRootData;
 
-	if (m_pRootData != NULL)
+	if (m_pDataPointer != NULL)
 	{
-		pJsonStruct = cJSON_GetObjectItem(m_pRootData, strKey);
+		pJsonStruct = cJSON_GetObjectItem(m_pDataPointer, strKey);
 	}
 
 	if(pJsonStruct == NULL)
 	{
 		//默认创建一个对象
 		pJsonStruct = cJSON_CreateNull();
-		cJSON_AddItemToObject(m_pRootData, strKey, pJsonStruct);
+		cJSON_AddItemToObject(m_pDataPointer, strKey, pJsonStruct);
 
 	}	
 	m_pDataPointer = pJsonStruct;
@@ -523,7 +524,7 @@ void testjson()
 		int nSize = arrayObj.size();
 		for (int i=0; i<nSize; i++)
 		{
-			std::cout << arrayObj[i]["key2"].asString();
+			std::cout <<i <<": key2=" << arrayObj[i]["key2"].asString();
 			if (i != nSize - 1 )
 				  std::cout << std::endl;
 		}
