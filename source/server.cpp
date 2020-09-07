@@ -16,8 +16,11 @@ public:
 	{
 		if(strApi == LOGIN_API)
 		{
-			std::string username;
-			jsonObj["username"].Get("username", username);
+			std::string username = jsonObj["username"].asString();
+			std::string passwd = jsonObj["password"].asString();
+
+			if(passwd == "123456" && username == "admin")
+				this->SendReply(true, 100, jsonObj);
 		}
 
 		return true;
@@ -27,7 +30,7 @@ public:
 
 int main(void) 
 {
-
+  testjson();
   CTxbZhzMgr txbweb;
   if(txbweb.Start("../../vuehello") == false)
   {

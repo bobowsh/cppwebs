@@ -192,35 +192,35 @@
 			Name="cppwebs"
 			>
 			<File
-				RelativePath="..\cppwebs\cJSON.c"
+				RelativePath="..\weblib\cJSON.c"
 				>
 			</File>
 			<File
-				RelativePath="..\cppwebs\cJSON.h"
+				RelativePath="..\weblib\cJSON.h"
 				>
 			</File>
 			<File
-				RelativePath="..\cppwebs\cppwebs.cpp"
+				RelativePath="..\weblib\cppwebs.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\cppwebs\cppwebs.h"
+				RelativePath="..\weblib\cppwebs.h"
 				>
 			</File>
 			<File
-				RelativePath="..\cppwebs\Json.cpp"
+				RelativePath="..\weblib\Json.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\cppwebs\Json.h"
+				RelativePath="..\weblib\Json.h"
 				>
 			</File>
 			<File
-				RelativePath="..\cppwebs\mongoose.c"
+				RelativePath="..\weblib\mongoose.c"
 				>
 			</File>
 			<File
-				RelativePath="..\cppwebs\mongoose.h"
+				RelativePath="..\weblib\mongoose.h"
 				>
 			</File>
 		</Filter>

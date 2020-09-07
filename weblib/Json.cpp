@@ -531,5 +531,5 @@ void testjson()
 	}
 
 
-	getchar();
+//	getchar();
 }
