@@ -21,6 +21,8 @@ public:
 
 			if(passwd == "123456" && username == "admin")
 				this->SendReply(true, 100, jsonObj);
+			else
+				this->SendReply(false, 100, jsonObj, "ÓÃ»§ÃÜÂë´íÎó");
 		}
 
 		return true;
@@ -32,7 +34,7 @@ int main(void)
 {
   testjson();
   CTxbZhzMgr txbweb;
-  if(txbweb.Start("../../vuehello") == false)
+  if(txbweb.Start("../../comsysmng") == false)
   {
 	   fprintf(stderr, "Cannot start webs\n");
 	  return -1;
