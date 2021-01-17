@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<title>综合管理系统</title>
+		<link rel="stylesheet" href="assets/css/main.css">
+		<link rel="stylesheet" href="assets/css/color-dark.css">
+		<link rel="stylesheet" href="assets/css/icon.css">
+		<link rel="stylesheet" href="modules/element-ui/lib/theme-chalk/index.css">
+		
+		<style type="text/css">
+
+		</style>
+ 
+		<!-- JS框架库-->
+		<script src="modules/vue/dist/vue.js"></script>
+		<script src="modules/vue-router/dist/vue-router.js"></script>
+		<script src="modules/element-ui/lib/index.js"></script>
+		<script src="modules/vue-resource/dist/vue-resource.js"></script>
+		<script src="modules/mockjs/dist/mock.js"></script>
+
+		<!-- 框架页面-->
+		<script src="components/common.js"></script>
+		<script src="components/Login.js"></script>
+		<!--script src="components/Header.js"></script-->
+		<script src="components/Home.js"></script>
+		<script src="components/SideBar.js"></script>
+
+		<!-- 业务页面--
+		1.每个二级菜单对应页面一个目录，里面放一个二级菜单sidemenu.js,配置要显示的菜单和对应页面路径
+		2.编写页面 
+		3.在index.html引用页面 
+		4.router.js配置路由，即菜单跳转路径和页面组件的关联,路由会把页面显示在routerview内
+		-->
+		<script src="views/dashboard.js"></script>
+		
+		<!-- 规划页面-->
+		<script src="views/paraplan/paraplanmenu.js"></script>
+		<script src="views/paraplan/uvplan.js"></script>
+		<script src="views/paraplan/hfplan.js"></script>
+		<script src="views/paraplan/satplan.js"></script>
+		
+		<!-- 设置页面-->
+		<script src="views/paraset/parasetmenu.js"></script>
+		<script src="views/paraset/hfset.js"></script>
+		<script src="views/paraset/satset.js"></script>
+		<script src="views/paraset/uvset.js"></script>
+		
+		<script src="views/page3.js"></script>
+		<!--script src="views/UvWavePlan.js"></script-->
+<!-- 		<script src="views/page1.js"></script>
+		<script src="views/page2.js"></script>
+		<script src="views/page3.js"></script>
+		<script src="views/page4.js"></script> -->
+		
+		<!-- 路由配置-->
+		<script src="router/router.js"></script>
+		<!-- script src="mockapi.js"></script-->
+
+	</head>
+	<body>
+		<div id="app">
+			<router-view></router-view>
+		</div>
+
+		<script>
+			const app = new Vue({
+				router
+			}).$mount('#app')
+		</script>
+	</body>
+</html>

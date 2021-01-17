@@ -34,7 +34,7 @@ int main(void)
 {
   testjson();
   CTxbZhzMgr txbweb;
-  if(txbweb.Start("../../comsysmng") == false)
+  if(txbweb.Start("../comsys") == false)
   {
 	   fprintf(stderr, "Cannot start webs\n");
 	  return -1;
